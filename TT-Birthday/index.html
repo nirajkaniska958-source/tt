@@ -42,6 +42,31 @@
         /* 避免因为背景为黑白，直接平滑展示画面 */
         #scene, #ui-layer { opacity: 1; }
         
+        /* 启动授权遮罩（解决 iOS13+ 苹果必须点击才能给陀螺仪权限的痛点） */
+        #start-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 9, 20, 0.95);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            transition: opacity 0.8s ease;
+        }
+        #start-btn {
+            padding: 15px 40px;
+            border: 1px solid rgba(255,255,255,0.6);
+            border-radius: 30px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
+            font-size: 1.1rem;
+            letter-spacing: 2px;
+            cursor: pointer;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        
         /* 独立闪烁的星星层 */
         #star { z-index: 2; animation: twinkle 3s infinite alternate; }
         #star1 { z-index: 3; animation: twinkle 4s infinite alternate -1s; }
@@ -59,8 +84,9 @@
         }
         #moon-container img {
             width: 100%; height: 100%; object-fit: cover;
-            /* 摒弃极度消耗性能的全屏 drop-shadow 滤镜，改用轻量的透明度呼吸 */
+            /* 恢复为发光的光晕，放弃透明度闪烁 */
             animation: moonBreath 6s infinite alternate ease-in-out; 
+            will-change: filter; /* 尽量优化发光的性能消耗 */
         }
 
         /* 海浪交错运动：往复滑动 */
@@ -134,7 +160,7 @@
         /* 文本框与发送区域 */
         #input-container {
             position: absolute;
-            bottom: 30px;
+            bottom: 8vh; /* 使用 vh 高度百分比来完美适配 iPhoneX 等长屏幕，使其相对画面比例不下沉 */
             left: 50%;
             transform: translateX(-50%);
             width: 85%;
@@ -147,31 +173,30 @@
 
         #diary-input {
             width: 100%;
-            min-height: 48px; /* 约等于两行高度 */
+            min-height: 48px;
             height: 48px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 12px;
+            background: transparent; /* 完全透明，融入底图画好的文本框 */
+            border: none; /* 去掉边框消除割裂感 */
             padding: 12px 15px;
-            color: #fff;
-            font-size: 1rem;
+            color: #222; /* 深灰色字体，完美反衬偏白的 heying 底背图案！ */
+            font-size: 1.1rem;
+            font-weight: bold;
             line-height: 1.4;
             box-sizing: border-box;
             resize: none;
-            backdrop-filter: blur(8px);
             transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
 
         #diary-input:focus {
-            height: 180px; /* 展开模式厚度增加 */
-            background: rgba(255, 255, 255, 0.2);
+            height: 180px; 
+            background: rgba(255, 255, 255, 0.65); /* 展开时光明正大的遮蔽后面的元素 */
             outline: none;
-            border-color: rgba(255, 255, 255, 0.7);
             border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
         }
 
         #diary-input::placeholder {
-            color: rgba(255, 255, 255, 0.6);
+            color: rgba(0, 0, 0, 0.45); /* 黑灰色的提示语 */
         }
 
         #send-btn {
@@ -229,10 +254,10 @@
             100% { transform: rotate(80deg) translateZ(0); opacity: 0; }
         }
         
-        /* 月亮本身呼吸感增强（使用 opacity 极致优化性能） */
+        /* 月亮本身光晕增强 */
         @keyframes moonBreath {
-            0% { opacity: 0.7; }
-            100% { opacity: 1; }
+            0% { filter: drop-shadow(0 0 5px rgba(255, 255, 220, 0.3)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 35px rgba(255, 255, 255, 1)); opacity: 1; }
         }
 
         /* 发送动画特效的星星粒子 */
@@ -248,6 +273,11 @@
     </style>
 </head>
 <body>
+
+    <!-- 苹果 iOS 专属陀螺仪授权开屏按钮 -->
+    <div id="start-overlay">
+        <div id="start-btn">点击开启流星星空</div>
+    </div>
 
     <!-- 视角容器 -->
     <div id="scene">
@@ -365,17 +395,40 @@
         }
         requestAnimationFrame(updateParallax);
 
-        // 监听设备倾斜 (陀螺仪)
-        window.addEventListener('deviceorientation', (e) => {
+        // 苹果 iOS 13+ 终极对策：必须由用户屏幕点击才能获取陀螺仪！
+        const startOverlay = document.getElementById('start-overlay');
+        
+        startOverlay.addEventListener('click', () => {
+            // 消失遮罩
+            startOverlay.style.opacity = '0';
+            setTimeout(() => startOverlay.remove(), 800);
+
+            // 请求陀螺仪权限 (iOS 13+ 专用)
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            alert("已拒接开启陀螺仪，只能滑动体验视差啦");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // 安卓或旧设备直接挂载
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        });
+
+        // 抽离出来的陀螺仪解析函数
+        function handleOrientation(e) {
             if (e.beta !== null && e.gamma !== null) {
-                // gamma 代表左右翻转，beta 代表前后翻转
-                // 限制取值映射到 [-1, 1] 区间范围内
                 let x = Math.max(-1, Math.min(1, e.gamma / 45)); 
-                let y = Math.max(-1, Math.min(1, (e.beta - 45) / 45)); // 补偿45度的基准手持角
+                let y = Math.max(-1, Math.min(1, (e.beta - 45) / 45)); 
                 targetX = x;
                 targetY = y;
             }
-        });
+        }
 
         // 为兼容桌面调试，同时加上鼠标移动监听。
         // 修正为 pointermove 且排除了手指触摸事件，避免手机屏幕点击导致画面异常跳闪
